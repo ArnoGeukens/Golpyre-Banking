@@ -756,7 +756,7 @@ function debtCommand(message, args) {
     const loan = bankData.loans[l.loanId];
     const note = loan && loan.note ? ` - _${loan.note}_` : "";
     const multipleLoans = openLoans.filter((l2) => l2.lenderName === l.lenderName);
-    const loanId = multipleLoans.length > 1 ? ` - loan: **${l.loanId}**` : "";
+    const loanId = multipleLoans.length > 1 ? ` - loan_id: **${l.loanId}**` : "";
     return `• **${l.lenderName}** - **${l.balance} GP**${note}${loanId}`;
   });
   const total = openLoans.reduce((s, l) => s + l.balance, 0);
@@ -796,13 +796,13 @@ function debtorsCommand(message, args) {
     const loan = bankData.loans[l.loanId];
     const note = loan && loan.note ? ` - _${loan.note}_` : "";
     const multipleLoans = openLoans.filter((l2) => l2.borrowerName === l.borrowerName);
-    const loanId = multipleLoans.length > 1 ? ` - loan: **${l.loanId}**` : "";
+    const loanId = multipleLoans.length > 1 ? ` - loan_id: **${l.loanId}**` : "";
     return `• **${l.borrowerName}** - **${l.balance} GP**${note}${loanId}`;
   });
   const total = openLoans.reduce((s, l) => s + l.balance, 0);
 
   return message.channel.send(
-    `Unresolved loans where **${targetName}** is the lender:\n${lines.join("\n")}\nTotal owed to lender: **${total} GP**`
+    `Unresolved loans where **${targetName}** is the lender:\n${lines.join("\n")}\nTotal: **${total} GP**`
   );
 }
 
