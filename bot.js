@@ -584,11 +584,11 @@ async function loanCommand(message, args) {
   recordLoanTransaction(loanId, "loan", amount, message.author.id, note || "Loan created");
 
   return message.channel.send(
-    `Loan created.\n` +
-      `• Loan ID: **${loanId}**\n` +
+    `**__Loan created.__**\n` +
       `• Borrower: **${bankData.loans[loanId].borrowerName}**\n` +
       `• Lender: **${bankData.loans[loanId].lenderName}**\n` +
-      `• Initial debt: **${amount} GP**`
+      `• Initial debt: **${amount} GP**\n` +
+      `• Note: **${note}**`
   );
 }
 
@@ -661,7 +661,7 @@ async function repayCommand(message, args) {
     }
 
     return message.channel.send(
-      `Repaid **${amount} GP** on loan **${loanId}** (borrower **${loan.borrowerName}**, lender **${loan.lenderName}**).\n` +
+      `Repaid **${amount} GP** to **${loan.lenderName}**).\n` +
         `Loan balance: **${newBal} GP** (was ${oldBal} GP).` +
         extra
     );
@@ -685,11 +685,10 @@ async function repayCommand(message, args) {
   }
 
   if (matches.length > 1) {
-    const ids = matches.map((m) => `• **${m.loanId}**`).join("\n");
-    return message.channel.send(
-      `Borrower **${borrower.name}** has **multiple unresolved loans** with lender **${lenderName}**.\n` +
-        `Use \`!repay <amount> <loan_id>\` instead. Loan IDs:\n${ids}`
-    );
+    const loanNoteMappings = matches.map((m) => `• **${m.loanId}** - ${m.note}`).join("\n");
+    return message.channel.send(`Borrower **${borrower.name}** has **multiple unresolved loans** with lender **${lenderName}**.\n` +
+      `Use \`!repay <amount> <loan_id>\` instead.\n` +
+      `Loan IDs:\n${loanNoteMappings}`);
   }
 
   const loanId = matches[0].loanId;
@@ -781,7 +780,7 @@ async function accrueCommand(message, args) {
     recordLoanTransaction(loanId, "accrue", amount, actorId, "");
 
     return message.channel.send(
-      `Accrued **${amount} GP** on loan **${loanId}** (borrower **${loan.borrowerName}**, lender **${loan.lenderName}**).\n` +
+      `Accrued **${amount} GP** on loan with lender **${loan.lenderName}**).\n` +
         `Loan balance: **${newBal} GP** (was ${oldBal} GP).`
     );
   }
