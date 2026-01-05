@@ -595,124 +595,89 @@ async function loanCommand(message, args) {
 async function repayCommand(message, args) {
   // !repay <amount> <lender|loan_id>
   // !repay <@user|name> <amount> <lender|loan_id>
-  if (args.length < 2) {
-    return message.channel.send(
-      "Usage:\n`!repay <amount> <lender|loan_id>`\n`!repay <@user|name> <amount> <lender|loan_id>`"
-    );
-  }
+  const usage = "Usage:\n`!repay <amount> <lender|loan_id>`\n`!repay <@user|name> <amount> <lender|loan_id>`";
+  if (args.length < 2) return message.channel.send(usage);
 
-  let borrower;
-  let amountArg;
-  let targetArg;
-
+  // Parse arguments
+  let borrower, amountArg, targetArg;
   const firstIsNumber = Number.isFinite(Number(args[0])) && !message.mentions.users.size;
-
   if (firstIsNumber) {
     borrower = { id: message.author.id, name: getDefaultNameForUser(message.author) };
     amountArg = args[0];
     targetArg = args[1];
   } else {
     if (args.length < 3) {
-      return message.channel.send(
-        "Usage:\n`!repay <amount> <lender|loan_id>`\n`!repay <@user|name> <amount> <lender|loan_id>`"
-      );
+      return message.channel.send(usage);
     }
     borrower = resolvePersonFromArgOrMention(message, args[0]);
     amountArg = args[1];
     targetArg = args[2];
   }
-
   const amount = parseAmount(amountArg);
   if (amount === null) return message.channel.send("Amount must be a positive number.");
-
   const actorId = message.author.id;
 
-  // If targetArg is a known loan id, use it directly
+  // Get loan ID
+  let loanId;
   if (isLoanId(targetArg)) {
-    const loanId = normalizeLoanId(targetArg);
-    const loan = getLoan(loanId);
-    if (!loan) return message.channel.send(`Loan **${loanId}** not found.`);
-    if (loan.status === "resolved") return message.channel.send(`Loan **${loanId}** is already resolved.`);
-
-    // borrower ownership check
-    const borrowerMatches = borrower.id
-      ? loan.borrowerId === borrower.id
-      : eqName(loan.borrowerName, borrower.name);
-
-    if (!borrowerMatches) {
+    loanId = normalizeLoanId(targetArg);
+  } else {
+    const lenderName = String(targetArg || "").trim();
+    if (!lenderName) return message.channel.send("Lender cannot be empty.");
+    const matches = findOpenLoans({
+      borrowerId: borrower.id,
+      borrowerName: borrower.name,
+      lenderId: null,
+      lenderName,
+    });
+    if (!matches.length) {
       return message.channel.send(
-        `Loan **${loanId}** does not belong to borrower **${borrower.name}**.`
+        `No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`
       );
     }
-
-    const oldBal = Number(loan.balance) || 0;
-    const newBal = Math.max(0, oldBal - amount);
-
-    loan.balance = newBal;
-    loan.updatedAt = new Date().toISOString();
-
-    recordLoanTransaction(loanId, "repay", amount, actorId, "");
-
-    let extra = "";
-    if (newBal === 0) {
-      loan.status = "resolved";
-      recordLoanTransaction(loanId, "resolve", 0, actorId, "Loan resolved");
-      extra = `\nLoan is now **resolved**.`;
+    if (matches.length > 1) {
+      const loanNoteMappings = matches.map((m) => `• **${m.loanId}** - ${m.note}`).join("\n");
+      return message.channel.send(`Borrower **${borrower.name}** has **multiple unresolved loans** with lender **${lenderName}**.\n` +
+        `Use \`!repay <amount> <loan_id>\` instead.\n` +
+        `Loan IDs:\n${loanNoteMappings}`);
     }
-
-    return message.channel.send(
-      `Repaid **${amount} GP** to **${loan.lenderName}**).\n` +
-        `Loan balance: **${newBal} GP** (was ${oldBal} GP).` +
-        extra
-    );
+    loanId = matches[0].loanId;
   }
-
-  // Otherwise interpret as lender name
-  const lenderName = String(targetArg || "").trim();
-  if (!lenderName) return message.channel.send("Lender cannot be empty.");
-
-  const matches = findOpenLoans({
-    borrowerId: borrower.id,
-    borrowerName: borrower.name,
-    lenderId: null,
-    lenderName,
-  });
-
-  if (!matches.length) {
-    return message.channel.send(
-      `No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`
-    );
-  }
-
-  if (matches.length > 1) {
-    const loanNoteMappings = matches.map((m) => `• **${m.loanId}** - ${m.note}`).join("\n");
-    return message.channel.send(`Borrower **${borrower.name}** has **multiple unresolved loans** with lender **${lenderName}**.\n` +
-      `Use \`!repay <amount> <loan_id>\` instead.\n` +
-      `Loan IDs:\n${loanNoteMappings}`);
-  }
-
-  const loanId = matches[0].loanId;
+  
+  // Validation
   const loan = getLoan(loanId);
   if (!loan) return message.channel.send(`Loan **${loanId}** not found.`);
   if (loan.status === "resolved") return message.channel.send(`Loan **${loanId}** is already resolved.`);
+  const borrowerMatches = borrower.id
+    ? loan.borrowerId === borrower.id
+    : eqName(loan.borrowerName, borrower.name);
+  if (!borrowerMatches) {
+    return message.channel.send(
+      `Loan **${loanId}** does not belong to borrower **${borrower.name}**.`
+    );
+  }
 
+  // Repay
   const oldBal = Number(loan.balance) || 0;
   const newBal = Math.max(0, oldBal - amount);
-
   loan.balance = newBal;
   loan.updatedAt = new Date().toISOString();
-
   recordLoanTransaction(loanId, "repay", amount, actorId, "");
 
+  // Add info
   let extra = "";
+  if (isLoanId(targetArg)) {
+    extra += `\nNote: **${loan.note}**`;
+  }
   if (newBal === 0) {
     loan.status = "resolved";
     recordLoanTransaction(loanId, "resolve", 0, actorId, "Loan resolved");
-    extra = `\nLoan is now **resolved**.`;
+    extra += `\nLoan is now **resolved**.`;
   }
 
+  // Send response
   return message.channel.send(
-    `Repaid **${amount} GP** on loan with lender **${loan.lenderName}**).\n` +
+    `Repaid **${amount} GP** to **${loan.lenderName}**.\n` +
       `Loan balance: **${newBal} GP** (was ${oldBal} GP).` +
       extra
   );
@@ -721,111 +686,88 @@ async function repayCommand(message, args) {
 async function accrueCommand(message, args) {
   // !accrue <amount> <lender|loan_id>
   // !accrue <@user|name> <amount> <lender|loan_id>
-  if (args.length < 2) {
-    return message.channel.send(
-      "Usage:\n`!accrue <amount> <lender|loan_id>`\n`!accrue <@user|name> <amount> <lender|loan_id>`"
-    );
-  }
+  const usage =
+    "Usage:\n`!accrue <amount> <lender|loan_id>`\n`!accrue <@user|name> <amount> <lender|loan_id>`";
+  if (args.length < 2) return message.channel.send(usage);
 
-  let borrower;
-  let amountArg;
-  let targetArg;
-
+  // Parse arguments
+  let borrower, amountArg, targetArg;
   const firstIsNumber = Number.isFinite(Number(args[0])) && !message.mentions.users.size;
-
   if (firstIsNumber) {
     borrower = { id: message.author.id, name: getDefaultNameForUser(message.author) };
     amountArg = args[0];
     targetArg = args[1];
   } else {
-    if (args.length < 3) {
-      return message.channel.send(
-        "Usage:\n`!accrue <amount> <lender|loan_id>`\n`!accrue <@user|name> <amount> <lender|loan_id>`"
-      );
-    }
+    if (args.length < 3) return message.channel.send(usage);
     borrower = resolvePersonFromArgOrMention(message, args[0]);
     amountArg = args[1];
     targetArg = args[2];
   }
-
   const amount = parseAmount(amountArg);
   if (amount === null) return message.channel.send("Amount must be a positive number.");
-
   const actorId = message.author.id;
 
-  // If targetArg is a known loan id, use it directly
+  // Get loan ID
+  let loanId;
   if (isLoanId(targetArg)) {
-    const loanId = normalizeLoanId(targetArg);
-    const loan = getLoan(loanId);
-    if (!loan) return message.channel.send(`Loan **${loanId}** not found.`);
-    if (loan.status === "resolved") return message.channel.send(`Loan **${loanId}** is resolved; cannot accrue more.`);
-
-    // borrower ownership check
-    const borrowerMatches = borrower.id
-      ? loan.borrowerId === borrower.id
-      : eqName(loan.borrowerName, borrower.name);
-
-    if (!borrowerMatches) {
+    loanId = normalizeLoanId(targetArg);
+  } else {
+    const lenderName = String(targetArg || "").trim();
+    if (!lenderName) return message.channel.send("Lender cannot be empty.");
+    const matches = findOpenLoans({
+      borrowerId: borrower.id,
+      borrowerName: borrower.name,
+      lenderId: null,
+      lenderName,
+    });
+    if (!matches.length) {
       return message.channel.send(
-        `Loan **${loanId}** does not belong to borrower **${borrower.name}**.`
+        `No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`
       );
     }
-
-    const oldBal = Number(loan.balance) || 0;
-    const newBal = oldBal + amount;
-
-    loan.balance = newBal;
-    loan.updatedAt = new Date().toISOString();
-
-    recordLoanTransaction(loanId, "accrue", amount, actorId, "");
-
-    return message.channel.send(
-      `Accrued **${amount} GP** on loan with lender **${loan.lenderName}**).\n` +
-        `Loan balance: **${newBal} GP** (was ${oldBal} GP).`
-    );
+    if (matches.length > 1) {
+      const loanNoteMappings = matches.map((m) => `• **${m.loanId}** - ${m.note}`).join("\n");
+      return message.channel.send(
+        `Borrower **${borrower.name}** has **multiple unresolved loans** with lender **${lenderName}**.\n` +
+          `Use \`!accrue <amount> <loan_id>\` instead.\n` +
+          `Loan IDs:\n${loanNoteMappings}`
+      );
+    }
+    loanId = matches[0].loanId;
   }
 
-  // Otherwise interpret as lender name
-  const lenderName = String(targetArg || "").trim();
-  if (!lenderName) return message.channel.send("Lender cannot be empty.");
-
-  const matches = findOpenLoans({
-    borrowerId: borrower.id,
-    borrowerName: borrower.name,
-    lenderId: null,
-    lenderName,
-  });
-
-  if (!matches.length) {
-    return message.channel.send(
-      `No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`
-    );
-  }
-
-  if (matches.length > 1) {
-    const ids = matches.map((m) => `• **${m.loanId}**`).join("\n");
-    return message.channel.send(
-      `Borrower **${borrower.name}** has **multiple unresolved loans** with lender **${lenderName}**.\n` +
-        `Use \`!accrue <amount> <loan_id>\` instead. Loan IDs:\n${ids}`
-    );
-  }
-
-  const loanId = matches[0].loanId;
+  // Validation
   const loan = getLoan(loanId);
   if (!loan) return message.channel.send(`Loan **${loanId}** not found.`);
-  if (loan.status === "resolved") return message.channel.send(`Loan **${loanId}** is resolved; cannot accrue more.`);
+  if (loan.status === "resolved") {
+    return message.channel.send(`Loan **${loanId}** is resolved; cannot accrue more.`);
+  }
+  const borrowerMatches = borrower.id
+    ? loan.borrowerId === borrower.id
+    : eqName(loan.borrowerName, borrower.name);
 
+  if (!borrowerMatches) {
+    return message.channel.send(`Loan **${loanId}** does not belong to borrower **${borrower.name}**.`);
+  }
+
+  // Accrue
   const oldBal = Number(loan.balance) || 0;
   const newBal = oldBal + amount;
-
   loan.balance = newBal;
   loan.updatedAt = new Date().toISOString();
-
   recordLoanTransaction(loanId, "accrue", amount, actorId, "");
 
+  // Add info
+  let extra = "";
+  if (isLoanId(targetArg)) {
+    extra += `\nNote: **${loan.note}**`;
+  }
+
+  // Send response
   return message.channel.send(
-    `Accrued **${amount} GP** on loan with lender **${loan.lenderName}**).\n` +
-      `Loan balance: **${newBal} GP** (was ${oldBal} GP).`
+    `Accrued **${amount} GP** on loan with lender **${loan.lenderName}**.\n` +
+      `Loan balance: **${newBal} GP** (was ${oldBal} GP).` +
+      extra
   );
 }
 
