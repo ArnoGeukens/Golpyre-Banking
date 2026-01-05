@@ -538,11 +538,12 @@ async function loanCommand(message, args) {
   const note = noteArgs.join(" ");
 
   bankData.loans[loanId] = {
+    timestamp: now,
     borrowerName: borrower.name || "Unknown",
     lenderName: lender.name || "Unknown",
     balance: amount,
     status: "open",
-    timestamp: now,
+    actorId: message.author.id,
     note: note || "",
   };
 
