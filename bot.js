@@ -33,7 +33,7 @@ let bankData = {
   profiles: {}, // { [discordUserId: string]: { name: string } }
 
   // loans keyed by loanId
-  // { borrowerId?, borrowerName, lenderId?, lenderName, balance, status, createdAt, updatedAt, note? }
+  // { borrowerId?, borrowerName, lenderId?, lenderName, balance, status, createdAt, note? }
   loans: {},
   loanTransactions: {}, // { [loanId: string]: [ { timestamp, type, amount, actorId, note } ] }
 };
@@ -220,25 +220,19 @@ function generateLoanId(borrowerName, lenderName) {
   return safe;
 }
 
-function findOpenLoans({ borrowerId, borrowerName, lenderId, lenderName }) {
+function findOpenLoans(borrowerId, borrowerName, lenderId, lenderName) {
   return Object.entries(bankData.loans || {})
     .filter(([, loan]) => loan && loan.status !== "resolved")
     .filter(([, loan]) => {
       const borrowerMatch = borrowerId
         ? loan.borrowerId === borrowerId
         : eqName(loan.borrowerName, borrowerName);
-
       const lenderMatch = lenderId
         ? loan.lenderId === lenderId
         : eqName(loan.lenderName, lenderName);
-
       return borrowerMatch && lenderMatch;
     })
-    .map(([loanId, loan]) => ({
-      loanId,
-      updatedAt: loan.updatedAt || loan.createdAt || "",
-    }))
-    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    .map(([, loan]) => loan);
 }
 
 
@@ -577,7 +571,6 @@ async function loanCommand(message, args) {
     balance: amount,
     status: "open",
     createdAt: now,
-    updatedAt: now,
     note: note || "",
   };
 
@@ -661,7 +654,6 @@ async function repayCommand(message, args) {
   const oldBal = Number(loan.balance) || 0;
   const newBal = Math.max(0, oldBal - amount);
   loan.balance = newBal;
-  loan.updatedAt = new Date().toISOString();
   recordLoanTransaction(loanId, "repay", amount, actorId, "");
 
   // Add info
@@ -754,7 +746,6 @@ async function accrueCommand(message, args) {
   const oldBal = Number(loan.balance) || 0;
   const newBal = oldBal + amount;
   loan.balance = newBal;
-  loan.updatedAt = new Date().toISOString();
   recordLoanTransaction(loanId, "accrue", amount, actorId, "");
 
   // Add info
@@ -798,7 +789,6 @@ function debtCommand(message, args) {
       loanId,
       lenderName: loan.lenderName || "Unknown",
       balance: Number(loan.balance) || 0,
-      updatedAt: loan.updatedAt || loan.createdAt,
     }))
     .filter((x) => x.balance > 0)
     .sort((a, b) => b.balance - a.balance);
@@ -841,7 +831,6 @@ function debtorsCommand(message, args) {
       loanId,
       borrowerName: loan.borrowerName || "Unknown",
       balance: Number(loan.balance) || 0,
-      updatedAt: loan.updatedAt || loan.createdAt,
     }))
     .filter((x) => x.balance > 0)
     .sort((a, b) => b.balance - a.balance);
