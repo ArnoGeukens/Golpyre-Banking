@@ -933,7 +933,7 @@ function leaderboardCommand(message, args) {
     const gpEntriesFormatted = gpEntries
       .map(([name, bal], idx) => `**${idx + 1}.** ${name} - **${bal} GP**`)
       .join("\n");
-    fullMessage += `**Leaderboard (Top ${gpEntries.length} GP)**\n${gpEntriesFormatted}`;
+    fullMessage += `**Wealth Leaderboard (Top ${gpEntries.length})**\n${gpEntriesFormatted}`;
   }
 
   const debtEntries = getTopDebtEntries(count);
@@ -941,7 +941,7 @@ function leaderboardCommand(message, args) {
     const debtEntriesFormatted = debtEntries
       .map((row, idx) => `**${idx + 1}.** ${row.name} - **${row.debt} GP**`)
       .join("\n");
-    const debtSection = `**Total Debt (Top ${debtEntries.length})**\n${debtEntriesFormatted}`;
+    const debtSection = `**Debt Leaderboard (Top ${debtEntries.length})**\n${debtEntriesFormatted}`;
     fullMessage += fullMessage ? `\n\n${debtSection}` : debtSection;
   }
 
