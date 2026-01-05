@@ -220,15 +220,17 @@ function generateLoanId(borrowerName, lenderName) {
   return safe;
 }
 
-function findOpenLoan({ borrowerId, borrowerName, lenderId, lenderName }) {
-  const loans = Object.entries(bankData.loans || {})
+function findOpenLoans({ borrowerId, borrowerName, lenderId, lenderName }) {
+  return Object.entries(bankData.loans || {})
     .filter(([, loan]) => loan && loan.status !== "resolved")
     .filter(([, loan]) => {
       const borrowerMatch = borrowerId
         ? loan.borrowerId === borrowerId
         : eqName(loan.borrowerName, borrowerName);
 
-      const lenderMatch = lenderId ? loan.lenderId === lenderId : eqName(loan.lenderName, lenderName);
+      const lenderMatch = lenderId
+        ? loan.lenderId === lenderId
+        : eqName(loan.lenderName, lenderName);
 
       return borrowerMatch && lenderMatch;
     })
@@ -237,9 +239,8 @@ function findOpenLoan({ borrowerId, borrowerName, lenderId, lenderName }) {
       updatedAt: loan.updatedAt || loan.createdAt || "",
     }))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-
-  return loans.length ? loans[0].loanId : null;
 }
+
 
 // ============= COMMAND HANDLING =============
 
@@ -326,10 +327,10 @@ function helpCommand(message) {
     "**Loans (separate from bank balance)**",
     "`!loan <amount> <lender> [note...]` - Create a loan for you (borrower = you).",
     "`!loan <@user|name> <amount> <lender> [note...]` - Create a loan for a borrower.",
-    "`!repay <amount> <lender>` - Repay part/all of your loan to that lender.",
-    "`!repay <@user|name> <amount> <lender>` - Repay part/all of a borrower's loan.",
-    "`!accrue <amount> <lender>` - Add interest/fees to your loan to that lender.",
-    "`!accrue <@user|name> <amount> <lender>` - Add interest/fees to a borrower's loan.",
+    "`!repay <amount> <lender|loan_id>` - Repay part/all of your loan to that lender.",
+    "`!repay <@user|name> <amount> <lender|loan_id>` - Repay part/all of a borrower's loan.",
+    "`!accrue <amount> <lender|loan_id>` - Add interest/fees to your loan to that lender.",
+    "`!accrue <@user|name> <amount> <lender|loan_id>` - Add interest/fees to a borrower's loan.",
     "`!debt <@user|name>` - List unresolved loans of a borrower.",
     "`!debtors <@user|name>` - List unresolved loans where that person is the lender.",
     "",
@@ -361,6 +362,7 @@ function helpCommand(message) {
 }
 
 function exportDbCommand(message) {
+  // !exportdb
   try {
     if (!fs.existsSync(DATA_FILE)) return message.channel.send("Database file not found.");
 
@@ -376,6 +378,7 @@ function exportDbCommand(message) {
 }
 
 function setNameCommand(message, args) {
+  // !setname <name>
   if (!args.length) return message.channel.send("Usage: `!setname <name>`");
 
   const name = args.join(" ").trim();
@@ -388,7 +391,9 @@ function setNameCommand(message, args) {
 }
 
 async function depositCommand(message, args) {
-  if (args.length < 1) {
+  // !deposit <amount> [note...]
+  // !deposit <@user|name> <amount> [note...]
+  if (args.length < 2) {
     return message.channel.send("Usage:\n`!deposit <amount> [note...]`\n`!deposit <@user|name> <amount> [note...]`");
   }
 
@@ -403,7 +408,7 @@ async function depositCommand(message, args) {
     amountArg = args[0];
     noteArgs = args.slice(1);
   } else {
-    if (args.length < 2) {
+    if (args.length < 3) {
       return message.channel.send("Usage:\n`!deposit <amount> [note...]`\n`!deposit <@user|name> <amount> [note...]`");
     }
     accountName = resolveAccountName(message, args[0]);
@@ -427,7 +432,9 @@ async function depositCommand(message, args) {
 }
 
 async function withdrawCommand(message, args) {
-  if (args.length < 1) {
+  // !withdraw <amount> [note...]
+  // !withdraw <@user|name> <amount> [note...]
+  if (args.length < 2) {
     return message.channel.send("Usage:\n`!withdraw <amount> [note...]`\n`!withdraw <@user|name> <amount> [note...]`");
   }
 
@@ -442,7 +449,7 @@ async function withdrawCommand(message, args) {
     amountArg = args[0];
     noteArgs = args.slice(1);
   } else {
-    if (args.length < 2) {
+    if (args.length < 3) {
       return message.channel.send("Usage:\n`!withdraw <amount> [note...]`\n`!withdraw <@user|name> <amount> [note...]`");
     }
     accountName = resolveAccountName(message, args[0]);
@@ -470,50 +477,18 @@ async function withdrawCommand(message, args) {
 }
 
 function balanceCommand(message, args) {
+  // !balance
+  // !balance <@user|name>
   const accountName = resolveAccountName(message, args[0]);
   const balance = getBalance(accountName);
   message.channel.send(`Balance for **${accountName}**: **${balance} GP**.`);
 }
 
 function historyCommand(message, args) {
-  // Loan history mode: !history <loan_id> [count]
-  if (args.length >= 1 && !message.mentions.users.size && isLoanId(args[0])) {
-    const loanId = normalizeLoanId(args[0]);
-    let count = 5;
-
-    if (args[1]) {
-      const n = Number(args[1]);
-      if (Number.isFinite(n) && n > 0 && n <= 20) count = Math.floor(n);
-    }
-
-    const list = bankData.loanTransactions[loanId] || [];
-    if (list.length === 0) return message.channel.send(`No transactions for loan **${loanId}** yet.`);
-
-    const recent = list.slice(-count);
-    const lines = recent.map((t) => {
-      const date = new Date(t.timestamp).toLocaleString();
-      let sign = "";
-      if (t.type === "loan" || t.type === "accrue") sign = "+";
-      if (t.type === "repay") sign = "-";
-      const actor = `<@${t.actorId}>`;
-      const note = t.note ? ` - ${t.note}` : "";
-      const amt = t.amount && t.amount !== 0 ? `${sign}${t.amount} GP` : `${t.type}`;
-      return `\`${date}\` ${t.type} ${amt} by ${actor}${note}`;
-    });
-
-    const loan = getLoan(loanId);
-    const bal = loan ? Number(loan.balance) || 0 : 0;
-    const status = loan ? loan.status : "unknown";
-    const borrower = loan ? loan.borrowerName : "Unknown";
-    const lender = loan ? loan.lenderName : "Unknown";
-
-    return message.channel.send(
-      `Last ${recent.length} transaction(s) for loan **${loanId}** (borrower **${borrower}**, lender **${lender}**, balance **${bal} GP**, status **${status}**):\n` +
-        lines.join("\n")
-    );
-  }
-
-  // Bank account history
+  // !history
+  // !history <count>
+  // !history <@user|name>
+  // !history <@user|name> <count>
   let accountName = getDefaultNameForUser(message.author);
   let count = 5;
 
@@ -618,57 +593,109 @@ async function loanCommand(message, args) {
 }
 
 async function repayCommand(message, args) {
-  // !repay <amount> <lender>
-  // !repay <@user|name> <amount> <lender>
+  // !repay <amount> <lender|loan_id>
+  // !repay <@user|name> <amount> <lender|loan_id>
   if (args.length < 2) {
     return message.channel.send(
-      "Usage:\n`!repay <amount> <lender>`\n`!repay <@user|name> <amount> <lender>`"
+      "Usage:\n`!repay <amount> <lender|loan_id>`\n`!repay <@user|name> <amount> <lender|loan_id>`"
     );
   }
 
   let borrower;
   let amountArg;
-  let lenderArg;
+  let targetArg;
 
   const firstIsNumber = Number.isFinite(Number(args[0])) && !message.mentions.users.size;
 
   if (firstIsNumber) {
     borrower = { id: message.author.id, name: getDefaultNameForUser(message.author) };
     amountArg = args[0];
-    lenderArg = args[1];
+    targetArg = args[1];
   } else {
     if (args.length < 3) {
       return message.channel.send(
-        "Usage:\n`!repay <amount> <lender>`\n`!repay <@user|name> <amount> <lender>`"
+        "Usage:\n`!repay <amount> <lender|loan_id>`\n`!repay <@user|name> <amount> <lender|loan_id>`"
       );
     }
     borrower = resolvePersonFromArgOrMention(message, args[0]);
     amountArg = args[1];
-    lenderArg = args[2];
+    targetArg = args[2];
   }
 
   const amount = parseAmount(amountArg);
   if (amount === null) return message.channel.send("Amount must be a positive number.");
 
-  const lenderName = String(lenderArg || "").trim();
+  const actorId = message.author.id;
+
+  // If targetArg is a known loan id, use it directly
+  if (isLoanId(targetArg)) {
+    const loanId = normalizeLoanId(targetArg);
+    const loan = getLoan(loanId);
+    if (!loan) return message.channel.send(`Loan **${loanId}** not found.`);
+    if (loan.status === "resolved") return message.channel.send(`Loan **${loanId}** is already resolved.`);
+
+    // borrower ownership check
+    const borrowerMatches = borrower.id
+      ? loan.borrowerId === borrower.id
+      : eqName(loan.borrowerName, borrower.name);
+
+    if (!borrowerMatches) {
+      return message.channel.send(
+        `Loan **${loanId}** does not belong to borrower **${borrower.name}**.`
+      );
+    }
+
+    const oldBal = Number(loan.balance) || 0;
+    const newBal = Math.max(0, oldBal - amount);
+
+    loan.balance = newBal;
+    loan.updatedAt = new Date().toISOString();
+
+    recordLoanTransaction(loanId, "repay", amount, actorId, "");
+
+    let extra = "";
+    if (newBal === 0) {
+      loan.status = "resolved";
+      recordLoanTransaction(loanId, "resolve", 0, actorId, "Loan resolved");
+      extra = `\nLoan **${loanId}** is now **resolved**.`;
+    }
+
+    return message.channel.send(
+      `Repaid **${amount} GP** on loan **${loanId}** (borrower **${loan.borrowerName}**, lender **${loan.lenderName}**).\n` +
+        `Loan balance: **${newBal} GP** (was ${oldBal} GP).` +
+        extra
+    );
+  }
+
+  // Otherwise interpret as lender name
+  const lenderName = String(targetArg || "").trim();
   if (!lenderName) return message.channel.send("Lender cannot be empty.");
 
-  const loanId = findOpenLoan({
+  const matches = findOpenLoans({
     borrowerId: borrower.id,
     borrowerName: borrower.name,
     lenderId: null,
     lenderName,
   });
 
-  if (!loanId) {
-    return message.channel.send(`No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`);
+  if (!matches.length) {
+    return message.channel.send(
+      `No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`
+    );
   }
 
+  if (matches.length > 1) {
+    const ids = matches.map((m) => `• **${m.loanId}**`).join("\n");
+    return message.channel.send(
+      `Borrower **${borrower.name}** has **multiple unresolved loans** with lender **${lenderName}**.\n` +
+        `Use \`!repay <amount> <loan_id>\` instead. Loan IDs:\n${ids}`
+    );
+  }
+
+  const loanId = matches[0].loanId;
   const loan = getLoan(loanId);
   if (!loan) return message.channel.send(`Loan **${loanId}** not found.`);
   if (loan.status === "resolved") return message.channel.send(`Loan **${loanId}** is already resolved.`);
-
-  const actorId = message.author.id;
 
   const oldBal = Number(loan.balance) || 0;
   const newBal = Math.max(0, oldBal - amount);
@@ -693,57 +720,101 @@ async function repayCommand(message, args) {
 }
 
 async function accrueCommand(message, args) {
-  // !accrue <amount> <lender>
-  // !accrue <@user|name> <amount> <lender>
+  // !accrue <amount> <lender|loan_id>
+  // !accrue <@user|name> <amount> <lender|loan_id>
   if (args.length < 2) {
     return message.channel.send(
-      "Usage:\n`!accrue <amount> <lender>`\n`!accrue <@user|name> <amount> <lender>`"
+      "Usage:\n`!accrue <amount> <lender|loan_id>`\n`!accrue <@user|name> <amount> <lender|loan_id>`"
     );
   }
 
   let borrower;
   let amountArg;
-  let lenderArg;
+  let targetArg;
 
   const firstIsNumber = Number.isFinite(Number(args[0])) && !message.mentions.users.size;
 
   if (firstIsNumber) {
     borrower = { id: message.author.id, name: getDefaultNameForUser(message.author) };
     amountArg = args[0];
-    lenderArg = args[1];
+    targetArg = args[1];
   } else {
     if (args.length < 3) {
       return message.channel.send(
-        "Usage:\n`!accrue <amount> <lender>`\n`!accrue <@user|name> <amount> <lender>`"
+        "Usage:\n`!accrue <amount> <lender|loan_id>`\n`!accrue <@user|name> <amount> <lender|loan_id>`"
       );
     }
     borrower = resolvePersonFromArgOrMention(message, args[0]);
     amountArg = args[1];
-    lenderArg = args[2];
+    targetArg = args[2];
   }
 
   const amount = parseAmount(amountArg);
   if (amount === null) return message.channel.send("Amount must be a positive number.");
 
-  const lenderName = String(lenderArg || "").trim();
+  const actorId = message.author.id;
+
+  // If targetArg is a known loan id, use it directly
+  if (isLoanId(targetArg)) {
+    const loanId = normalizeLoanId(targetArg);
+    const loan = getLoan(loanId);
+    if (!loan) return message.channel.send(`Loan **${loanId}** not found.`);
+    if (loan.status === "resolved") return message.channel.send(`Loan **${loanId}** is resolved; cannot accrue more.`);
+
+    // borrower ownership check
+    const borrowerMatches = borrower.id
+      ? loan.borrowerId === borrower.id
+      : eqName(loan.borrowerName, borrower.name);
+
+    if (!borrowerMatches) {
+      return message.channel.send(
+        `Loan **${loanId}** does not belong to borrower **${borrower.name}**.`
+      );
+    }
+
+    const oldBal = Number(loan.balance) || 0;
+    const newBal = oldBal + amount;
+
+    loan.balance = newBal;
+    loan.updatedAt = new Date().toISOString();
+
+    recordLoanTransaction(loanId, "accrue", amount, actorId, "");
+
+    return message.channel.send(
+      `Accrued **${amount} GP** on loan **${loanId}** (borrower **${loan.borrowerName}**, lender **${loan.lenderName}**).\n` +
+        `Loan balance: **${newBal} GP** (was ${oldBal} GP).`
+    );
+  }
+
+  // Otherwise interpret as lender name
+  const lenderName = String(targetArg || "").trim();
   if (!lenderName) return message.channel.send("Lender cannot be empty.");
 
-  const loanId = findOpenLoan({
+  const matches = findOpenLoans({
     borrowerId: borrower.id,
     borrowerName: borrower.name,
     lenderId: null,
     lenderName,
   });
 
-  if (!loanId) {
-    return message.channel.send(`No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`);
+  if (!matches.length) {
+    return message.channel.send(
+      `No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`
+    );
   }
 
+  if (matches.length > 1) {
+    const ids = matches.map((m) => `• **${m.loanId}**`).join("\n");
+    return message.channel.send(
+      `Borrower **${borrower.name}** has **multiple unresolved loans** with lender **${lenderName}**.\n` +
+        `Use \`!accrue <amount> <loan_id>\` instead. Loan IDs:\n${ids}`
+    );
+  }
+
+  const loanId = matches[0].loanId;
   const loan = getLoan(loanId);
   if (!loan) return message.channel.send(`Loan **${loanId}** not found.`);
   if (loan.status === "resolved") return message.channel.send(`Loan **${loanId}** is resolved; cannot accrue more.`);
-
-  const actorId = message.author.id;
 
   const oldBal = Number(loan.balance) || 0;
   const newBal = oldBal + amount;
@@ -759,7 +830,10 @@ async function accrueCommand(message, args) {
   );
 }
 
+
 function debtCommand(message, args) {
+  // !debt
+  // !debt <@user|name>
   if (args.length < 1) return message.channel.send("Usage: `!debt <@user|name>`");
 
   let targetUser = null;
@@ -789,13 +863,19 @@ function debtCommand(message, args) {
 
   if (openLoans.length === 0) return message.channel.send(`No unresolved loans for **${targetName}**.`);
 
-  const lines = openLoans.map((l) => `• **${l.loanId}** — **${l.balance} GP** (lender: **${l.lenderName}**)`);
+  const lines = openLoans.map((l) => {
+    const loan = bankData.loans[l.loanId];
+    const note = loan && loan.note ? ` - _${loan.note}_` : "";
+    return `• **${l.loanId}** - **${l.balance} GP** (lender: **${l.lenderName}**)${note}`;
+  }); 
   const total = openLoans.reduce((s, l) => s + l.balance, 0);
 
   return message.channel.send(`Unresolved loans for **${targetName}**:\n${lines.join("\n")}\nTotal: **${total} GP**`);
 }
 
 function debtorsCommand(message, args) {
+  // !debtors
+  // !debtors <@user|name>
   if (args.length < 1) return message.channel.send("Usage: `!debtors <@user|name>`");
 
   let targetUser = null;
@@ -825,7 +905,11 @@ function debtorsCommand(message, args) {
 
   if (openLoans.length === 0) return message.channel.send(`No unresolved loans where **${targetName}** is the lender.`);
 
-  const lines = openLoans.map((l) => `• **${l.loanId}** — **${l.balance} GP** (borrower: **${l.borrowerName}**)`);
+  const lines = openLoans.map((l) => {
+    const loan = bankData.loans[l.loanId];
+    const note = loan && loan.note ? ` - _${loan.note}_` : "";
+    return `• **${l.loanId}** - **${l.balance} GP** (borrower: **${l.borrowerName}**)${note}`;
+  });
   const total = openLoans.reduce((s, l) => s + l.balance, 0);
 
   return message.channel.send(
@@ -834,6 +918,8 @@ function debtorsCommand(message, args) {
 }
 
 function leaderboardCommand(message, args) {
+  // !leaderboard
+  // !leaderboard <count>
   let count = 10;
   if (args[0]) {
     const n = Number(args[0]);
@@ -845,7 +931,7 @@ function leaderboardCommand(message, args) {
   const gpEntries = getTopGpEntries(count);
   if (gpEntries.length) {
     const gpEntriesFormatted = gpEntries
-      .map(([name, bal], idx) => `**${idx + 1}.** ${name} — **${bal} GP**`)
+      .map(([name, bal], idx) => `**${idx + 1}.** ${name} - **${bal} GP**`)
       .join("\n");
     fullMessage += `**Leaderboard (Top ${gpEntries.length} GP)**\n${gpEntriesFormatted}`;
   }
@@ -853,7 +939,7 @@ function leaderboardCommand(message, args) {
   const debtEntries = getTopDebtEntries(count);
   if (debtEntries.length) {
     const debtEntriesFormatted = debtEntries
-      .map((row, idx) => `**${idx + 1}.** ${row.name} — **${row.debt} GP**`)
+      .map((row, idx) => `**${idx + 1}.** ${row.name} - **${row.debt} GP**`)
       .join("\n");
     const debtSection = `**Total Debt (Top ${debtEntries.length})**\n${debtEntriesFormatted}`;
     fullMessage += fullMessage ? `\n\n${debtSection}` : debtSection;
