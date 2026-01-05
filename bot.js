@@ -33,9 +33,8 @@ let bankData = {
   profiles: {}, // { [discordUserId: string]: { name: string } }
 
   // loans keyed by loanId
-  // { borrowerId?, borrowerName, lenderId?, lenderName, balance, status, createdAt, note? }
-  loans: {},
-  loanTransactions: {}, // { [loanId: string]: [ { timestamp, type, amount, actorId, note } ] }
+  loans: {}, // { timestamp, borrowerName, lenderName, balance, status, actorId, note }
+  loanTransactions: {}, // { [loanId: string]: [ { timestamp, type, amount, actorId, note } ] }s
 };
 
 function loadData() {
@@ -50,16 +49,6 @@ function loadData() {
       if (!bankData.profiles) bankData.profiles = {};
       if (!bankData.loans) bankData.loans = {};
       if (!bankData.loanTransactions) bankData.loanTransactions = {};
-
-      // migrate older loan records to include lender fields if missing
-      for (const [, loan] of Object.entries(bankData.loans)) {
-        if (!loan) continue;
-        if (!("lenderName" in loan)) loan.lenderName = "Unknown";
-        if (!("lenderId" in loan)) loan.lenderId = null;
-        if (!("borrowerId" in loan)) loan.borrowerId = null;
-        if (!("borrowerName" in loan)) loan.borrowerName = "Unknown";
-        if (!("status" in loan)) loan.status = "open";
-      }
     }
   } catch (err) {
     console.error("Failed to load bank data:", err);
@@ -138,7 +127,7 @@ function getTopGpEntries(limit) {
 }
 
 function getTopDebtEntries(limit) {
-  const debtByBorrower = {}; // { [borrowerKey]: { name: string, debt: number } }
+  const debtByBorrower = {}; // { [borrowerName]: { debt: number } }
 
   for (const [, loan] of Object.entries(bankData.loans || {})) {
     if (!loan) continue;
@@ -147,16 +136,12 @@ function getTopDebtEntries(limit) {
     const bal = Number(loan.balance) || 0;
     if (!Number.isFinite(bal) || bal <= 0) continue;
 
-    const borrowerKey = loan.borrowerId || `name:${(loan.borrowerName || "Unknown").toLowerCase()}`;
     const borrowerName = loan.borrowerName || "Unknown";
 
-    if (!debtByBorrower[borrowerKey]) {
-      debtByBorrower[borrowerKey] = { name: borrowerName, debt: 0 };
+    if (!debtByBorrower[borrowerName]) {
+      debtByBorrower[borrowerName] = { debt: 0 };
     }
-    if (borrowerName && borrowerName !== "Unknown") {
-      debtByBorrower[borrowerKey].name = borrowerName;
-    }
-    debtByBorrower[borrowerKey].debt += bal;
+    debtByBorrower[borrowerName].debt += bal;
   }
 
   return Object.values(debtByBorrower)
@@ -220,16 +205,12 @@ function generateLoanId(borrowerName, lenderName) {
   return safe;
 }
 
-function findOpenLoans(borrowerId, borrowerName, lenderId, lenderName) {
+function findOpenLoans(borrowerName, lenderName) {
   return Object.entries(bankData.loans || {})
     .filter(([, loan]) => loan && loan.status !== "resolved")
     .filter(([, loan]) => {
-      const borrowerMatch = borrowerId
-        ? loan.borrowerId === borrowerId
-        : eqName(loan.borrowerName, borrowerName);
-      const lenderMatch = lenderId
-        ? loan.lenderId === lenderId
-        : eqName(loan.lenderName, lenderName);
+      const borrowerMatch = eqName(loan.borrowerName, borrowerName);
+      const lenderMatch = eqName(loan.lenderName, lenderName);
       return borrowerMatch && lenderMatch;
     })
     .map(([, loan]) => loan);
@@ -564,13 +545,11 @@ async function loanCommand(message, args) {
   const note = noteArgs.join(" ");
 
   bankData.loans[loanId] = {
-    borrowerId: borrower.id || null,
     borrowerName: borrower.name || "Unknown",
-    lenderId: lender.id || null,
     lenderName: lender.name || "Unknown",
     balance: amount,
     status: "open",
-    createdAt: now,
+    timestamp: now,
     note: note || "",
   };
 
@@ -617,12 +596,7 @@ async function repayCommand(message, args) {
   } else {
     const lenderName = String(targetArg || "").trim();
     if (!lenderName) return message.channel.send("Lender cannot be empty.");
-    const matches = findOpenLoans({
-      borrowerId: borrower.id,
-      borrowerName: borrower.name,
-      lenderId: null,
-      lenderName,
-    });
+    const matches = findOpenLoans({borrowerName: borrower.name, lenderName: lenderName});
     if (!matches.length) {
       return message.channel.send(
         `No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`
@@ -641,9 +615,7 @@ async function repayCommand(message, args) {
   const loan = getLoan(loanId);
   if (!loan) return message.channel.send(`Loan **${loanId}** not found.`);
   if (loan.status === "resolved") return message.channel.send(`Loan **${loanId}** is already resolved.`);
-  const borrowerMatches = borrower.id
-    ? loan.borrowerId === borrower.id
-    : eqName(loan.borrowerName, borrower.name);
+  const borrowerMatches = eqName(loan.borrowerName, borrower.name);
   if (!borrowerMatches) {
     return message.channel.send(
       `Loan **${loanId}** does not belong to borrower **${borrower.name}**.`
@@ -706,12 +678,7 @@ async function accrueCommand(message, args) {
   } else {
     const lenderName = String(targetArg || "").trim();
     if (!lenderName) return message.channel.send("Lender cannot be empty.");
-    const matches = findOpenLoans({
-      borrowerId: borrower.id,
-      borrowerName: borrower.name,
-      lenderId: null,
-      lenderName,
-    });
+    const matches = findOpenLoans({borrowerName: borrower.name, lenderName: lenderName});
     if (!matches.length) {
       return message.channel.send(
         `No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`
@@ -734,9 +701,7 @@ async function accrueCommand(message, args) {
   if (loan.status === "resolved") {
     return message.channel.send(`Loan **${loanId}** is resolved; cannot accrue more.`);
   }
-  const borrowerMatches = borrower.id
-    ? loan.borrowerId === borrower.id
-    : eqName(loan.borrowerName, borrower.name);
+  const borrowerMatches = eqName(loan.borrowerName, borrower.name);
 
   if (!borrowerMatches) {
     return message.channel.send(`Loan **${loanId}** does not belong to borrower **${borrower.name}**.`);
@@ -766,14 +731,13 @@ async function accrueCommand(message, args) {
 function debtCommand(message, args) {
   // !debt
   // !debt <@user|name>
-  let targetUser = null;
   let targetName = null;
 
   if (args.length === 0) {
-    targetUser = message.author;
+    const targetUser = message.author;
     targetName = getDefaultNameForUser(targetUser);
   } else if (message.mentions.users.size > 0) {
-    targetUser = message.mentions.users.first();
+    const targetUser = message.mentions.users.first();
     targetName = getDefaultNameForUser(targetUser);
   } else {
     targetName = String(args[0]).trim();
@@ -782,7 +746,6 @@ function debtCommand(message, args) {
   const openLoans = Object.entries(bankData.loans || {})
     .filter(([, loan]) => loan && loan.status !== "resolved")
     .filter(([, loan]) => {
-      if (targetUser) return loan.borrowerId === targetUser.id;
       return eqName(loan.borrowerName, targetName);
     })
     .map(([loanId, loan]) => ({
