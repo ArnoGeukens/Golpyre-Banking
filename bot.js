@@ -657,7 +657,7 @@ async function repayCommand(message, args) {
     if (newBal === 0) {
       loan.status = "resolved";
       recordLoanTransaction(loanId, "resolve", 0, actorId, "Loan resolved");
-      extra = `\nLoan **${loanId}** is now **resolved**.`;
+      extra = `\nLoan is now **resolved**.`;
     }
 
     return message.channel.send(
@@ -708,11 +708,11 @@ async function repayCommand(message, args) {
   if (newBal === 0) {
     loan.status = "resolved";
     recordLoanTransaction(loanId, "resolve", 0, actorId, "Loan resolved");
-    extra = `\nLoan **${loanId}** is now **resolved**.`;
+    extra = `\nLoan is now **resolved**.`;
   }
 
   return message.channel.send(
-    `Repaid **${amount} GP** on loan **${loanId}** (borrower **${loan.borrowerName}**, lender **${loan.lenderName}**).\n` +
+    `Repaid **${amount} GP** on loan with lender **${loan.lenderName}**).\n` +
       `Loan balance: **${newBal} GP** (was ${oldBal} GP).` +
       extra
   );
@@ -824,7 +824,7 @@ async function accrueCommand(message, args) {
   recordLoanTransaction(loanId, "accrue", amount, actorId, "");
 
   return message.channel.send(
-    `Accrued **${amount} GP** on loan **${loanId}** (borrower **${loan.borrowerName}**, lender **${loan.lenderName}**).\n` +
+    `Accrued **${amount} GP** on loan with lender **${loan.lenderName}**).\n` +
       `Loan balance: **${newBal} GP** (was ${oldBal} GP).`
   );
 }
