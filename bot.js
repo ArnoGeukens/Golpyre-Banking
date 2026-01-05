@@ -34,7 +34,7 @@ let bankData = {
 
   // loans keyed by loanId
   loans: {}, // { timestamp, borrowerName, lenderName, balance, status, actorId, note }
-  loanTransactions: {}, // { [loanId: string]: [ { timestamp, type, amount, actorId, note } ] }s
+  loanTransactions: {}, // { [loanId: string]: [ { timestamp, type, amount, actorId, note } ] }
 };
 
 function loadData() {
@@ -127,7 +127,7 @@ function getTopGpEntries(limit) {
 }
 
 function getTopDebtEntries(limit) {
-  const debtByBorrower = {}; // { [borrowerName]: { debt: number } }
+  const debtByBorrower = {}; // { [borrowerName]: number }
 
   for (const [, loan] of Object.entries(bankData.loans || {})) {
     if (!loan) continue;
@@ -137,14 +137,11 @@ function getTopDebtEntries(limit) {
     if (!Number.isFinite(bal) || bal <= 0) continue;
 
     const borrowerName = loan.borrowerName || "Unknown";
-
-    if (!debtByBorrower[borrowerName]) {
-      debtByBorrower[borrowerName] = { debt: 0 };
-    }
-    debtByBorrower[borrowerName].debt += bal;
+    debtByBorrower[borrowerName] = (debtByBorrower[borrowerName] || 0) + bal;
   }
 
-  return Object.values(debtByBorrower)
+  return Object.entries(debtByBorrower)
+    .map(([name, debt]) => ({ name, debt }))
     .filter((v) => Number.isFinite(v.debt) && v.debt > 0)
     .sort((a, b) => b.debt - a.debt)
     .slice(0, limit);
@@ -208,12 +205,8 @@ function generateLoanId(borrowerName, lenderName) {
 function findOpenLoans(borrowerName, lenderName) {
   return Object.entries(bankData.loans || {})
     .filter(([, loan]) => loan && loan.status !== "resolved")
-    .filter(([, loan]) => {
-      const borrowerMatch = eqName(loan.borrowerName, borrowerName);
-      const lenderMatch = eqName(loan.lenderName, lenderName);
-      return borrowerMatch && lenderMatch;
-    })
-    .map(([, loan]) => loan);
+    .filter(([, loan]) => eqName(loan.borrowerName, borrowerName) && eqName(loan.lenderName, lenderName))
+    .map(([loanId, loan]) => ({ loanId, ...loan }));
 }
 
 
@@ -596,7 +589,7 @@ async function repayCommand(message, args) {
   } else {
     const lenderName = String(targetArg || "").trim();
     if (!lenderName) return message.channel.send("Lender cannot be empty.");
-    const matches = findOpenLoans({borrowerName: borrower.name, lenderName: lenderName});
+    const matches = findOpenLoans(borrower.name, lenderName);
     if (!matches.length) {
       return message.channel.send(
         `No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`
@@ -678,7 +671,7 @@ async function accrueCommand(message, args) {
   } else {
     const lenderName = String(targetArg || "").trim();
     if (!lenderName) return message.channel.send("Lender cannot be empty.");
-    const matches = findOpenLoans({borrowerName: borrower.name, lenderName: lenderName});
+    const matches = findOpenLoans(borrower.name, lenderName);
     if (!matches.length) {
       return message.channel.send(
         `No unresolved loan found for borrower **${borrower.name}** with lender **${lenderName}**.`
@@ -771,14 +764,13 @@ function debtCommand(message, args) {
 function debtorsCommand(message, args) {
   // !debtors
   // !debtors <@user|name>
-  let targetUser = null;
-  let targetName = null;
+  let targetName;
 
   if (args.length === 0) {
-    targetUser = message.author;
+    const targetUser = message.author;
     targetName = getDefaultNameForUser(targetUser);
   } else if (message.mentions.users.size > 0) {
-    targetUser = message.mentions.users.first();
+    const targetUser = message.mentions.users.first();
     targetName = getDefaultNameForUser(targetUser);
   } else {
     targetName = String(args[0]).trim();
@@ -786,10 +778,7 @@ function debtorsCommand(message, args) {
 
   const openLoans = Object.entries(bankData.loans || {})
     .filter(([, loan]) => loan && loan.status !== "resolved")
-    .filter(([, loan]) => {
-      if (targetUser) return loan.lenderId === targetUser.id;
-      return eqName(loan.lenderName, targetName);
-    })
+    .filter(([, loan]) => eqName(loan.lenderName, targetName))
     .map(([loanId, loan]) => ({
       loanId,
       borrowerName: loan.borrowerName || "Unknown",
