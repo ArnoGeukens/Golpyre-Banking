@@ -528,7 +528,7 @@ function historyCommand(message, args) {
 async function loanCommand(message, args) {
   // !loan <amount> <lender> [note...]
   // !loan <@user|name> <amount> <lender> [note...]
-  if (args.length < 2) {
+  if (args.length < 3) {
     return message.channel.send(
       "Usage:\n`!loan <amount> <lender> [note...]`\n`!loan <@user|name> <amount> <lender> [note...]`"
     );
@@ -547,7 +547,7 @@ async function loanCommand(message, args) {
     lenderArg = args[1];
     noteArgs = args.slice(2);
   } else {
-    if (args.length < 3) {
+    if (args.length < 4) {
       return message.channel.send(
         "Usage:\n`!loan <amount> <lender> [note...]`\n`!loan <@user|name> <amount> <lender> [note...]`"
       );
@@ -834,12 +834,13 @@ async function accrueCommand(message, args) {
 function debtCommand(message, args) {
   // !debt
   // !debt <@user|name>
-  if (args.length < 1) return message.channel.send("Usage: `!debt <@user|name>`");
-
   let targetUser = null;
   let targetName = null;
 
-  if (message.mentions.users.size > 0) {
+  if (args.length === 0) {
+    targetUser = message.author;
+    targetName = getDefaultNameForUser(targetUser);
+  } else if (message.mentions.users.size > 0) {
     targetUser = message.mentions.users.first();
     targetName = getDefaultNameForUser(targetUser);
   } else {
@@ -876,12 +877,13 @@ function debtCommand(message, args) {
 function debtorsCommand(message, args) {
   // !debtors
   // !debtors <@user|name>
-  if (args.length < 1) return message.channel.send("Usage: `!debtors <@user|name>`");
-
   let targetUser = null;
   let targetName = null;
 
-  if (message.mentions.users.size > 0) {
+  if (args.length === 0) {
+    targetUser = message.author;
+    targetName = getDefaultNameForUser(targetUser);
+  } else if (message.mentions.users.size > 0) {
     targetUser = message.mentions.users.first();
     targetName = getDefaultNameForUser(targetUser);
   } else {
