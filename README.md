@@ -1,1 +1,9 @@
 # Golpyre-Banking
+open command prompt
+node bot.js
+
+send commands:
+!help
+
+zip entire folder to upload to discloud
+or upload to wispbyte
